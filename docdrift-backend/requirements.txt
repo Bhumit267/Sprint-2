@@ -3,6 +3,7 @@ uvicorn
 langchain
 langchain-openai
 langchain-text-splitters
+langchain-chroma
 chromadb
 python-dotenv
 pydantic

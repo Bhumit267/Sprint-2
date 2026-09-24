@@ -29,8 +29,9 @@ wheels/
 .env.local
 
 # Database & persistence
-data/chroma_db/*
-!data/chroma_db/.gitkeep
+**/data/chroma_db/*
+!**/data/chroma_db/.gitkeep
+*.sqlite3
 
 # IDE & OS
 .vscode/
