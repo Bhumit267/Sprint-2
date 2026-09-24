@@ -2,6 +2,7 @@ fastapi
 uvicorn
 langchain
 langchain-openai
+langchain-text-splitters
 chromadb
 python-dotenv
 pydantic
