@@ -15,6 +15,7 @@ from app.retrieval.vector_store import (
 def build_chroma_filter(
     version: Optional[str] = None,
     doc_type: Optional[str] = None,
+    org_id: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """Builds a Chroma-compatible 'where' filter dictionary.
 
@@ -23,6 +24,7 @@ def build_chroma_filter(
     Args:
         version: Target version filter (e.g. 'v2.1', 'v3.0').
         doc_type: Target doc_type filter ('api_reference', 'migration_guide', 'changelog').
+        org_id: Target organization ID filter.
 
     Returns:
         Chroma where filter dictionary, or None if no filters specified.
@@ -33,6 +35,8 @@ def build_chroma_filter(
         conditions.append({"version": {"$eq": version}})
     if doc_type:
         conditions.append({"doc_type": {"$eq": doc_type}})
+    if org_id:
+        conditions.append({"org_id": {"$eq": org_id}})
 
     if not conditions:
         return None
@@ -44,6 +48,7 @@ def build_chroma_filter(
 
 def search(
     query: str,
+    org_id: str,
     version: Optional[str] = None,
     doc_type: Optional[str] = None,
     top_k: int = 5,
@@ -54,7 +59,7 @@ def search(
     """Searches the Chroma vector store with optional version and document type filtering.
 
     Pipeline:
-    1. Embeds the query text using OpenAI text-embedding-3-small via LangChain.
+    1. Embeds the query text using Ollama Cloud nomic-embed-text via LangChain.
     2. Constructs metadata filter expressions based on provided version/doc_type.
     3. Runs vector similarity search against the Chroma collection.
     4. Computes similarity scores from cosine distances.
@@ -62,6 +67,7 @@ def search(
 
     Args:
         query: User input query text.
+        org_id: Target organization ID filter.
         version: Optional version to restrict search to (e.g., 'v2.1', 'v3.0').
         doc_type: Optional document type filter.
         top_k: Number of highest-ranking results to return.
@@ -86,7 +92,7 @@ def search(
     query_vector = embed_query(query, embedding_model=embedding_model)
 
     # 2. Build filter expression
-    where_filter = build_chroma_filter(version=version, doc_type=doc_type)
+    where_filter = build_chroma_filter(version=version, doc_type=doc_type, org_id=org_id)
 
     # Clamp top_k to existing collection count
     n_results = min(top_k, total_count)

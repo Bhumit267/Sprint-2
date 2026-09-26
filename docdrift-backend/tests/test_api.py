@@ -9,6 +9,9 @@ BACKEND_ROOT = Path(__file__).resolve().parent.parent
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
+import os
+os.environ["DOCDRIFT_TEST_MODE"] = "true"
+
 from app.main import app
 
 client = TestClient(app)

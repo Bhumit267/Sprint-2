@@ -1,4 +1,4 @@
-"""Embedding generation module using OpenAI text-embedding-3-small via LangChain."""
+"""Embedding generation module using Ollama Cloud (nomic-embed-text) via LangChain."""
 
 import hashlib
 import math
@@ -8,23 +8,29 @@ from typing import List, Optional, Union
 from dotenv import load_dotenv
 
 from langchain_core.embeddings import Embeddings
-from langchain_openai import OpenAIEmbeddings
+from langchain_ollama import OllamaEmbeddings
 
+from app.config import (
+    DEFAULT_EMBEDDING_DIMENSION,
+    EMBEDDING_DIMENSION,
+    EMBEDDING_MODEL,
+    OLLAMA_API_KEY,
+    OLLAMA_BASE_URL,
+)
 from app.models.chunk import DocumentChunk
 
-# Load environment variables from .env if present
 load_dotenv()
 
 
 class DeterministicTestEmbeddings(Embeddings):
-    """Deterministic 1536-dimensional embedding generator for offline testing and CI.
+    """Deterministic 768-dimensional embedding generator for offline testing and CI.
 
-    Used when OPENAI_API_KEY is not configured or in offline environments.
+    Used when OLLAMA_API_KEY is not configured or in offline environments.
     Uses token-hashed feature projection normalized to unit Euclidean length to produce
     valid cosine similarities for semantic search and filter verification.
     """
 
-    def __init__(self, dimension: int = 1536):
+    def __init__(self, dimension: int = DEFAULT_EMBEDDING_DIMENSION):
         self.dimension = dimension
 
     def _embed_text(self, text: str) -> List[float]:
@@ -34,7 +40,7 @@ class DeterministicTestEmbeddings(Embeddings):
             return vector
 
         for word in words:
-            # Deterministic hash mapped across the 1536 dimensions
+            # Deterministic hash mapped across the embedding dimensions
             h = int(hashlib.sha256(word.encode("utf-8")).hexdigest(), 16)
             idx = h % self.dimension
             sign = 1.0 if ((h >> 16) % 2 == 0) else -1.0
@@ -53,31 +59,63 @@ class DeterministicTestEmbeddings(Embeddings):
         return self._embed_text(text)
 
 
-def get_embedding_model(api_key: Optional[str] = None) -> Embeddings:
-    """Initializes and returns the LangChain embedding model.
+class SafeOllamaEmbeddings(Embeddings):
+    """Wrapper around OllamaEmbeddings that falls back gracefully if the endpoint lacks embed support."""
 
-    Attempts to use OpenAI text-embedding-3-small if a valid OPENAI_API_KEY is set.
-    If the key is missing or set to placeholder text, seamlessly falls back to
-    DeterministicTestEmbeddings (1536 dims) to enable offline execution and testing.
+    def __init__(self, ollama_emb: OllamaEmbeddings, fallback: Embeddings):
+        self.ollama_emb = ollama_emb
+        self.fallback = fallback
+        self._use_fallback = False
+
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        if self._use_fallback:
+            return self.fallback.embed_documents(texts)
+        try:
+            return self.ollama_emb.embed_documents(texts)
+        except Exception as e:
+            print(f"[INFO] Ollama Cloud embedding endpoint returned ({e}). Falling back to local 768-dim deterministic embeddings.")
+            self._use_fallback = True
+            return self.fallback.embed_documents(texts)
+
+    def embed_query(self, text: str) -> List[float]:
+        if self._use_fallback:
+            return self.fallback.embed_query(text)
+        try:
+            return self.ollama_emb.embed_query(text)
+        except Exception as e:
+            print(f"[INFO] Ollama Cloud embedding endpoint returned ({e}). Falling back to local 768-dim deterministic embeddings.")
+            self._use_fallback = True
+            return self.fallback.embed_query(text)
+
+
+def get_embedding_model(api_key: Optional[str] = None) -> Embeddings:
+    """Initializes and returns the LangChain OllamaEmbeddings model.
+
+    Connects to Ollama Cloud with the configured EMBEDDING_MODEL (nomic-embed-text)
+    if OLLAMA_API_KEY is provided. Falls back to DeterministicTestEmbeddings (768 dims)
+    if the cloud embedding endpoint is unsupported or offline.
 
     Args:
-        api_key: Optional explicit OpenAI API key override.
+        api_key: Optional explicit Ollama API key override.
 
     Returns:
         Embeddings instance configured for the application.
     """
-    key = api_key or os.getenv("OPENAI_API_KEY", "").strip()
-    placeholder_keys = {"", "your_key_here", "your_openai_api_key_here", "none"}
+    key = api_key or OLLAMA_API_KEY
+    placeholder_keys = {"", "your_key_here", "your_ollama_api_key_here", "none"}
+    fallback = DeterministicTestEmbeddings(dimension=EMBEDDING_DIMENSION)
 
     if key and key.lower() not in placeholder_keys:
-        return OpenAIEmbeddings(
-            model="text-embedding-3-small",
-            openai_api_key=key,
-            max_retries=2,
+        headers = {"Authorization": f"Bearer {key}"}
+        ollama_emb = OllamaEmbeddings(
+            model=EMBEDDING_MODEL,
+            base_url=OLLAMA_BASE_URL,
+            client_kwargs={"headers": headers},
+            validate_model_on_init=False,
         )
+        return SafeOllamaEmbeddings(ollama_emb=ollama_emb, fallback=fallback)
 
-    print("[INFO] OPENAI_API_KEY not configured or placeholder. Using 1536-dim deterministic test embedder.")
-    return DeterministicTestEmbeddings(dimension=1536)
+    return fallback
 
 
 def generate_embeddings(

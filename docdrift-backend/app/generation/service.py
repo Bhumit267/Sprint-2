@@ -11,6 +11,7 @@ from app.retrieval.vector_store import DEFAULT_COLLECTION_NAME
 def answer_question(
     question: str,
     version: str,
+    org_id: str,
     top_k: int = 5,
     collection_name: str = DEFAULT_COLLECTION_NAME,
     persist_dir: Optional[Union[str, Path]] = None,
@@ -21,12 +22,13 @@ def answer_question(
 
     Pipeline:
     1. Retrieval: Performs similarity search filtered strictly by the specified version.
-    2. Generation: Injects retrieved version-matched chunks into gpt-4o-mini prompt.
+    2. Generation: Injects retrieved version-matched chunks into llama3.2 grounded prompt.
     3. Verification: Checks for refusal conditions and formats exact citations.
 
     Args:
         question: Developer's question.
         version: Required version string (e.g., 'v2.1', 'v3.0', 'v3.2').
+        org_id: Target organization ID filter.
         top_k: Number of retrieved candidate chunks.
         collection_name: Chroma collection name.
         persist_dir: Vector database persistence path.
@@ -52,6 +54,7 @@ def answer_question(
     # 1. Retrieve version-filtered candidate chunks
     retrieved_chunks = search(
         query=question,
+        org_id=org_id,
         version=version,
         top_k=top_k,
         collection_name=collection_name,

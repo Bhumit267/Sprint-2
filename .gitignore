@@ -13,8 +13,8 @@ develop-eggs/
 dist/
 downloads/
 eggs/
-.eggs/
-lib/
+# Environment / build artifacts
+!docdrift-frontend/lib/
 lib64/
 parts/
 sdist/
@@ -32,6 +32,8 @@ wheels/
 **/data/chroma_db/*
 !**/data/chroma_db/.gitkeep
 *.sqlite3
+*.sqlite
+*.db
 
 # IDE & OS
 .vscode/

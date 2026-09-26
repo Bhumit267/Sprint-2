@@ -1,6 +1,6 @@
 # DocDrift Backend
 
-DocDrift is a version-aware Retrieval-Augmented Generation (RAG) system built for university sprint (Team: GroundTruth).
+DocDrift is a version-aware Retrieval-Augmented Generation (RAG) system built for university sprint (Team: GroundTruth), powered by **Ollama Cloud**.
 
 ## Core Capabilities
 - Ingests version-tagged API references, migration guides, and changelogs.
@@ -8,6 +8,10 @@ DocDrift is a version-aware Retrieval-Augmented Generation (RAG) system built fo
 - Executes version-specific retrieval filtering per query.
 - Emits citations with exact document, version, and section traceability.
 - Refuses gracefully when no version-matching documentation exists.
+
+## Models (Ollama Cloud)
+- **Generation Model**: `llama3.2` — Meta's high-performance, lightweight instruction-tuned model.
+- **Embedding Model**: `nomic-embed-text` — 768-dimensional embedding model purpose-built for RAG retrieval with 8,192 token context.
 
 ## Getting Started
 
@@ -35,15 +39,28 @@ pip install -r requirements.txt
 
 ### 3. Configure Environment Variables
 
-Copy the sample environment file and set your OpenAI API key:
+Copy the sample environment file:
 
 ```bash
 cp .env.example .env
 ```
 
-Open `.env` and provide your API key:
+Open `.env` and configure your **Ollama Cloud** settings:
 ```env
-OPENAI_API_KEY=your_key_here
+OLLAMA_API_KEY=your_ollama_api_key_here
+OLLAMA_BASE_URL=https://ollama.com
+```
+
+#### How to get an Ollama Cloud API Key:
+1. Visit [https://ollama.com/settings/keys](https://ollama.com/settings/keys).
+2. Sign in with your Ollama account.
+3. Generate an API key.
+4. Copy and paste it into `docdrift-backend/.env`.
+
+### 4. Run the Backend API
+
+```powershell
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 ## Sample Documentation Data

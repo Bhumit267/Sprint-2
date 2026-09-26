@@ -1,4 +1,4 @@
-"""Answer generation module using OpenAI gpt-4o-mini with refusal detection and citations."""
+"""Answer generation module using Ollama Cloud (llama3.2) with refusal detection and citations."""
 
 import os
 import re
@@ -6,8 +6,9 @@ from typing import Any, Dict, List, Optional
 from dotenv import load_dotenv
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
+from langchain_ollama import ChatOllama
 
+from app.config import GENERATION_MODEL, OLLAMA_API_KEY, OLLAMA_BASE_URL
 from app.generation.prompts import (
     SYSTEM_PROMPT_TEMPLATE,
     USER_PROMPT_TEMPLATE,
@@ -33,7 +34,7 @@ REFUSAL_PHRASES = [
 
 
 class DeterministicTestLLM:
-    """Mock LLM used for offline testing when OPENAI_API_KEY is not configured.
+    """Mock LLM used for offline testing when OLLAMA_API_KEY is not configured.
 
     Performs grounded response synthesis based strictly on provided context or returns
     an explicit refusal when context is missing or irrelevant.
@@ -109,29 +110,31 @@ class DeterministicTestLLM:
 
 
 def get_llm(api_key: Optional[str] = None) -> Any:
-    """Initializes the LLM model instance (gpt-4o-mini).
+    """Initializes the LLM model instance using Ollama Cloud (llama3.2).
 
-    Uses OpenAI API if OPENAI_API_KEY is configured and valid.
+    Uses Ollama Cloud API if OLLAMA_API_KEY is configured and valid.
     Falls back to DeterministicTestLLM for offline test suites.
 
     Args:
         api_key: Optional API key override.
 
     Returns:
-        ChatOpenAI or DeterministicTestLLM instance.
+        ChatOllama or DeterministicTestLLM instance.
     """
-    key = api_key or os.getenv("OPENAI_API_KEY", "").strip()
-    placeholder_keys = {"", "your_key_here", "your_openai_api_key_here", "none"}
+    key = api_key or OLLAMA_API_KEY
+    placeholder_keys = {"", "your_key_here", "your_ollama_api_key_here", "none"}
 
     if key and key.lower() not in placeholder_keys:
-        return ChatOpenAI(
-            model="gpt-4o-mini",
+        headers = {"Authorization": f"Bearer {key}"}
+        return ChatOllama(
+            model=GENERATION_MODEL,
+            base_url=OLLAMA_BASE_URL,
+            client_kwargs={"headers": headers},
             temperature=0.0,
-            openai_api_key=key,
-            max_retries=2,
+            validate_model_on_init=False,
         )
 
-    print("[INFO] OPENAI_API_KEY not configured or placeholder. Using DeterministicTestLLM for generation.")
+    print(f"[INFO] OLLAMA_API_KEY not configured or placeholder. Using DeterministicTestLLM for generation.")
     return DeterministicTestLLM()
 
 

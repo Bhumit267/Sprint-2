@@ -7,12 +7,21 @@ import chromadb
 from chromadb.api import ClientAPI
 from chromadb.api.models.Collection import Collection
 
+from dotenv import load_dotenv
+
+from app.config import (
+    CHROMA_PERSIST_DIR,
+    CHROMA_PERSIST_DIRECTORY,
+    DEFAULT_COLLECTION_NAME,
+    EMBEDDING_DIMENSION,
+    EMBEDDING_MODEL,
+)
 from app.embeddings.embedder import generate_embeddings, get_embedding_model
 from app.models.chunk import DocumentChunk
 
-# Resolve default persistent directory to data/chroma_db
-DEFAULT_PERSIST_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "chroma_db"
-DEFAULT_COLLECTION_NAME = "docdrift_docs"
+load_dotenv()
+
+DEFAULT_PERSIST_DIR = CHROMA_PERSIST_DIR
 
 
 def get_chroma_client(persist_dir: Optional[Union[str, Path]] = None) -> ClientAPI:
@@ -24,7 +33,7 @@ def get_chroma_client(persist_dir: Optional[Union[str, Path]] = None) -> ClientA
     Returns:
         chromadb.PersistentClient instance.
     """
-    directory = Path(persist_dir or os.getenv("CHROMA_PERSIST_DIRECTORY") or DEFAULT_PERSIST_DIR).resolve()
+    directory = Path(persist_dir or CHROMA_PERSIST_DIRECTORY or DEFAULT_PERSIST_DIR).resolve()
     directory.mkdir(parents=True, exist_ok=True)
     return chromadb.PersistentClient(path=str(directory))
 
@@ -59,7 +68,7 @@ def index_chunks(
 
     Stores:
     - Text content as document body
-    - 1536-dimensional embeddings (OpenAI text-embedding-3-small)
+    - Embeddings generated via Ollama Cloud (nomic-embed-text, 768 dims)
     - Full metadata: {source_doc, doc_type, version, chunk_index, section}
     - Deterministic, collision-free chunk IDs
 

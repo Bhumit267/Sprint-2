@@ -1,0 +1,103 @@
+@import "tailwindcss";
+@config "../tailwind.config.ts";
+
+@theme {
+  --color-primary: #0F3D2E;
+  --color-primary-hover: #0A2B20;
+  --color-primary-light: #E6EFEA;
+
+  --color-accent: #B8860B;
+  --color-accent-hover: #996F08;
+  --color-accent-light: #F8F3E6;
+
+  --color-warning: #7B3F3F;
+  --color-warning-hover: #653333;
+  --color-warning-light: #F5ECEC;
+
+  --color-background: var(--background);
+  --color-text: var(--text);
+  --color-border: var(--border);
+
+  --color-study-bg: #FAF6EE;
+  --color-study-bg-dark: #161A16;
+  --color-study-text: #1C2B24;
+  --color-study-text-dark: #EDE7D9;
+  --color-study-border: #D9CFB8;
+  --color-study-border-dark: #2A322A;
+
+  --font-serif: var(--font-fraunces), Georgia, serif;
+  --font-sans: var(--font-inter), system-ui, sans-serif;
+}
+
+:root {
+  --background: #FAF6EE;
+  --text: #1C2B24;
+  --border: #D9CFB8;
+}
+
+.dark {
+  --background: #161A16;
+  --text: #EDE7D9;
+  --border: #2A322A;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--text);
+  font-family: var(--font-inter), system-ui, sans-serif;
+}
+
+/* Subtle archival paper texture & hairline styling */
+.paper-grain {
+  background-image: radial-gradient(rgba(28, 43, 36, 0.04) 1px, transparent 0);
+  background-size: 24px 24px;
+}
+
+.dark .paper-grain {
+  background-image: radial-gradient(rgba(237, 231, 217, 0.04) 1px, transparent 0);
+  background-size: 24px 24px;
+}
+
+.hairline-border {
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+/* Reference card subtle archive styling */
+.archive-card {
+  background-color: #FFFFFF;
+  border: 1px solid #D9CFB8;
+  box-shadow: 0 1px 3px rgba(15, 61, 46, 0.04), 0 1px 2px rgba(15, 61, 46, 0.02);
+}
+
+.dark .archive-card {
+  background-color: #1A1F1A;
+  border-color: #2A322A;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+/* Refined custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #D9CFB8;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #B8860B;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: #2A322A;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #B8860B;
+}

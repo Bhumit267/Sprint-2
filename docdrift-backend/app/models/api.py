@@ -37,9 +37,11 @@ class IngestedDocumentInfo(BaseModel):
         doc_type: Inferred category (api_reference, migration_guide, changelog).
         version: Associated product version.
     """
+    id: str = Field(..., description="Document database ID")
     source_doc: str = Field(..., description="Document file name")
     doc_type: str = Field(..., description="Document category")
     version: str = Field(..., description="Product version")
+    last_updated: str = Field(..., description="Last updated timestamp")
 
 
 class IngestResponse(BaseModel):

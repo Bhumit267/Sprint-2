@@ -1,34 +1,89 @@
-"""FastAPI application entrypoint for DocDrift version-aware documentation RAG system."""
+"""FastAPI application entrypoint for DocDrift version-aware documentation RAG system using Ollama Cloud."""
 
 import os
 from pathlib import Path
+import sys
+from contextlib import asynccontextmanager
 from typing import Any, Dict, List
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, status, Depends, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-import openai
 
+from app.config import (
+    CHROMA_PERSIST_DIR,
+    DEFAULT_COLLECTION_NAME,
+    GENERATION_MODEL,
+    OLLAMA_API_KEY,
+    OLLAMA_BASE_URL,
+    RAW_DOCS_DIR,
+)
 from app.generation.service import answer_question
 from app.ingestion.chunker import chunk_documents
 from app.ingestion.loader import load_markdown_documents
 from app.models.api import AskRequest, AskResponse, IngestResponse, IngestedDocumentInfo
+from app.models.chunk import RawDocument
 from app.retrieval.vector_store import (
-    DEFAULT_COLLECTION_NAME,
     get_chroma_client,
     get_collection,
     index_chunks,
 )
+from app.models.db import init_db, get_db, Document
+from sqlalchemy.orm import Session
+from app.auth import auth_router
+from app.auth.dependencies import require_role
+from app.supabase_client import get_supabase
 
 load_dotenv()
 
+
+def validate_environment() -> None:
+    """Validates required environment configuration on server startup.
+
+    Exits immediately with a clear red error message if OLLAMA_API_KEY is missing,
+    empty, or set to placeholder text.
+    """
+    if os.getenv("DOCDRIFT_TEST_MODE", "").lower() == "true":
+        return
+
+    api_key = os.getenv("OLLAMA_API_KEY", "").strip()
+    placeholder_keys = {"", "your_key_here", "your_ollama_api_key_here", "none"}
+
+    if not api_key or api_key.lower() in placeholder_keys:
+        red_banner = (
+            "\n\033[91m"
+            "================================================================================\n"
+            "  CRITICAL STARTUP ERROR: OLLAMA_API_KEY is missing or empty!\n"
+            "================================================================================\n"
+            "  The DocDrift server requires a valid Ollama Cloud API key to run.\n"
+            "  1. Obtain your key from: https://ollama.com/settings/keys\n"
+            "  2. Open the file: docdrift-backend/.env\n"
+            "  3. Set your key:\n"
+            "       OLLAMA_API_KEY=your_actual_ollama_key_here\n"
+            "  4. Save the file and restart the server.\n"
+            "================================================================================\033[0m\n"
+        )
+        sys.stderr.write(red_banner)
+        sys.stderr.flush()
+        sys.exit(1)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager running startup checks before handling requests."""
+    validate_environment()
+    init_db()
+    yield
+
+
 app = FastAPI(
-    title="DocDrift Backend",
-    description="Version-aware documentation Retrieval-Augmented Generation API (Team: GroundTruth)",
+    title="DocDrift Backend (Ollama Cloud)",
+    description="Version-aware documentation Retrieval-Augmented Generation API powered by Ollama Cloud (Team: GroundTruth)",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
-# 4. Configure CORS middleware allowing requests from Next.js frontend
+# Configure CORS middleware allowing requests from Next.js frontend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -40,16 +95,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Paths
-BASE_DIR = Path(__file__).resolve().parent.parent
-RAW_DOCS_DIR = BASE_DIR / "data" / "raw_docs"
-CHROMA_PERSIST_DIR = BASE_DIR / "data" / "chroma_db"
+# Mount authentication router
+app.include_router(auth_router)
 
 
 @app.get("/", tags=["Health"])
 def root() -> Dict[str, str]:
     """Root status endpoint."""
-    return {"status": "ok", "app": "DocDrift", "version": "1.0.0"}
+    return {
+        "status": "ok",
+        "app": "DocDrift",
+        "version": "1.0.0",
+        "provider": "Ollama Cloud",
+        "generation_model": GENERATION_MODEL,
+    }
 
 
 @app.post(
@@ -59,38 +118,36 @@ def root() -> Dict[str, str]:
     tags=["Query"],
     summary="Query documentation with strict version isolation",
 )
-def ask_endpoint(payload: AskRequest) -> Dict[str, Any]:
+def ask_endpoint(
+    payload: AskRequest,
+    current_user: Dict[str, Any] = Depends(require_role("admin", "employee")),
+) -> Dict[str, Any]:
     """Answers a developer question for a specified product version.
 
     Pipeline:
     1. Validates input request.
     2. Runs vector search filtered to the given version.
-    3. Synthesizes a grounded answer via gpt-4o-mini or returns a refusal if not documented.
+    3. Synthesizes a grounded answer via Ollama Cloud (llama3.2) or returns a refusal if not documented.
     4. Attaches exact citations with source_doc, doc_type, version, section.
 
     Raises:
-        HTTPException (500): If OpenAI API key is missing or authentication fails.
+        HTTPException (500): If Ollama Cloud API key is missing or authentication fails.
     """
     try:
         result = answer_question(
             question=payload.question,
             version=payload.version,
+            org_id=current_user["org_id"],
             top_k=5,
             persist_dir=CHROMA_PERSIST_DIR,
         )
         return result
-    except (openai.AuthenticationError, openai.OpenAIError) as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"OpenAI API authentication error: {str(e)}. Please check your OPENAI_API_KEY in .env.",
-        )
     except Exception as e:
-        # Check for unconfigured API key or other runtime errors
         err_msg = str(e)
-        if "api_key" in err_msg.lower():
+        if "api_key" in err_msg.lower() or "unauthorized" in err_msg.lower() or "401" in err_msg:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="OpenAI API key is missing or invalid. Please check your .env configuration.",
+                detail=f"Ollama Cloud authentication error: {err_msg}. Please check your OLLAMA_API_KEY in .env.",
             )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -105,52 +162,81 @@ def ask_endpoint(payload: AskRequest) -> Dict[str, Any]:
     tags=["Documents"],
     summary="List all indexed documents with version and doc_type",
 )
-def list_documents_endpoint() -> List[Dict[str, str]]:
-    """Returns all ingested documentation files tracked in the Chroma vector store.
-
-    Deduplicates metadata records by source document name and version.
-    """
+def list_documents_endpoint(
+    current_user: Dict[str, Any] = Depends(require_role("admin", "employee")),
+    db: Session = Depends(get_db),
+) -> List[Dict[str, str]]:
+    """Returns all ingested documentation files tracked in Postgres."""
     try:
-        client = get_chroma_client(persist_dir=CHROMA_PERSIST_DIR)
-        collection = get_collection(client=client, collection_name=DEFAULT_COLLECTION_NAME)
-
-        total_count = collection.count()
-        if total_count == 0:
-            return []
-
-        # Retrieve all chunk metadata from Chroma
-        stored_data = collection.get(include=["metadatas"])
-        metadatas = stored_data.get("metadatas", [])
-
-        # Deduplicate records by (source_doc, version)
-        seen = set()
-        documents: List[Dict[str, str]] = []
-
-        for meta in metadatas:
-            if not meta:
-                continue
-            source_doc = meta.get("source_doc")
-            version = meta.get("version")
-            doc_type = meta.get("doc_type", "unknown")
-
-            key = (source_doc, version)
-            if key not in seen and source_doc and version:
-                seen.add(key)
-                documents.append({
-                    "source_doc": source_doc,
-                    "doc_type": doc_type,
-                    "version": version,
-                })
-
-        # Sort for predictable output
-        documents.sort(key=lambda d: (d["version"], d["source_doc"]))
-        return documents
+        org_id = current_user["org_id"]
+        docs = db.query(Document).filter(Document.org_id == org_id).order_by(Document.version.desc(), Document.filename).all()
+        
+        return [
+            {
+                "id": doc.id,
+                "source_doc": doc.filename,
+                "doc_type": doc.doc_type,
+                "version": doc.version,
+                "last_updated": doc.uploaded_at.strftime("%Y-%m-%d %H:%M:%S")
+            }
+            for doc in docs
+        ]
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch indexed documents from vector store: {str(e)}",
         )
 
+
+@app.get(
+    "/versions",
+    response_model=List[str],
+    status_code=status.HTTP_200_OK,
+    tags=["Documents"],
+    summary="List all distinct versions present in the organization's indexed documents",
+)
+def list_versions_endpoint(
+    current_user: Dict[str, Any] = Depends(require_role("admin", "employee")),
+    db: Session = Depends(get_db),
+) -> List[str]:
+    """Returns a list of unique versions available for the user's organization."""
+    try:
+        org_id = current_user["org_id"]
+        # Query distinct versions from the Document table
+        versions = db.query(Document.version).filter(Document.org_id == org_id).distinct().all()
+        # Flatten the list of tuples and sort descending
+        version_list = sorted([v[0] for v in versions if v[0]], reverse=True)
+        return version_list
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch versions from database: {str(e)}",
+        )
+@app.get(
+    "/documents/{doc_id}/download",
+    status_code=status.HTTP_200_OK,
+    tags=["Documents"],
+    summary="Get a signed URL to download a document",
+)
+def download_document_endpoint(
+    doc_id: str,
+    current_user: Dict[str, Any] = Depends(require_role("admin", "employee")),
+    db: Session = Depends(get_db),
+) -> Dict[str, str]:
+    """Generates a signed URL for an uploaded document."""
+    doc = db.query(Document).filter(Document.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    if doc.org_id != current_user["org_id"]:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    try:
+        supabase = get_supabase()
+        res = supabase.storage.from_("documents").create_signed_url(doc.storage_path, 3600)
+        return {"download_url": res["signedURL"]}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate download link: {e}")
 
 @app.post(
     "/ingest",
@@ -159,39 +245,70 @@ def list_documents_endpoint() -> List[Dict[str, str]]:
     tags=["Ingestion"],
     summary="Trigger document loading, chunking, and indexing pipeline",
 )
-def trigger_ingest_endpoint() -> Dict[str, Any]:
-    """Ingests raw markdown documentation from data/raw_docs/ and indexes chunks into Chroma.
-
-    Allows adding or updating documentation files without restarting the backend service.
-    """
+def trigger_ingest_endpoint(
+    file: UploadFile = File(...),
+    version: str = Form(...),
+    doc_type: str = Form(...),
+    current_user: Dict[str, Any] = Depends(require_role("admin")),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Ingests an uploaded markdown document, saves to Supabase Storage and Postgres, then chunks/indexes."""
     try:
-        if not RAW_DOCS_DIR.exists():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Raw documentation directory not found at: {RAW_DOCS_DIR}",
-            )
+        content = file.file.read().decode("utf-8")
+        filename = file.filename
+        org_id = current_user["org_id"]
+        
+        # 1. Save to Supabase Storage
+        supabase = get_supabase()
+        bucket_name = "documents"
+        
+        # Ensure bucket exists (or try to create it, ignoring errors if it already exists)
+        try:
+            supabase.storage.create_bucket(bucket_name, {"public": False})
+        except Exception:
+            pass # Bucket might already exist
+            
+        storage_path = f"org-{org_id}/{filename}"
+        
+        # Upload file (overwrite if exists)
+        supabase.storage.from_(bucket_name).upload(
+            path=storage_path,
+            file=content.encode("utf-8"),
+            file_options={"content-type": "text/markdown", "upsert": "true"}
+        )
 
-        # 1. Load documents
-        raw_docs = load_markdown_documents(RAW_DOCS_DIR)
-        if not raw_docs:
-            return {
-                "status": "success",
-                "documents_processed": 0,
-                "indexed_chunks": 0,
-            }
+        # 2. Save record to Postgres
+        doc_record = Document(
+            org_id=org_id,
+            filename=filename,
+            storage_path=storage_path,
+            doc_type=doc_type,
+            version=version
+        )
+        db.add(doc_record)
+        db.commit()
 
-        # 2. Chunk documents
-        chunks = chunk_documents(raw_docs)
+        # 3. Create RawDocument and chunk
+        raw_doc = RawDocument(
+            content=content,
+            source_doc=filename,
+            doc_type=doc_type,
+            version=version,
+            file_path=storage_path,
+        )
 
-        # 3. Index chunks into persistent Chroma
+        chunks = chunk_documents([raw_doc], org_id=org_id)
+
+        # 4. Index chunks into persistent Chroma
         indexed_count = index_chunks(chunks=chunks, persist_dir=CHROMA_PERSIST_DIR)
 
         return {
             "status": "success",
-            "documents_processed": len(raw_docs),
+            "documents_processed": 1,
             "indexed_chunks": indexed_count,
         }
     except Exception as e:
+        db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Ingestion pipeline failed: {str(e)}",

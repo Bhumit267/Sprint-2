@@ -38,6 +38,7 @@ class DocumentChunk(BaseModel):
     version: str = Field(..., description="Product version string")
     chunk_index: int = Field(..., description="Sequential index of the chunk in the parent document")
     section: str = Field(default="General", description="Markdown section or heading context")
+    org_id: str = Field(..., description="Organization ID associated with the chunk")
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize chunk to a standard dictionary format.
@@ -59,4 +60,5 @@ class DocumentChunk(BaseModel):
             "version": self.version,
             "chunk_index": self.chunk_index,
             "section": self.section,
+            "org_id": self.org_id,
         }

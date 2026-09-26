@@ -76,6 +76,7 @@ def get_token_text_splitter(chunk_size: int = 500, chunk_overlap: int = 50) -> R
 
 def chunk_document(
     doc: RawDocument,
+    org_id: str,
     chunk_size: int = 500,
     chunk_overlap: int = 50,
 ) -> List[DocumentChunk]:
@@ -88,9 +89,11 @@ def chunk_document(
     - version: product version
     - chunk_index: zero-based index within the document
     - section: markdown heading context
+    - org_id: organization ID
 
     Args:
         doc: The source RawDocument to be chunked.
+        org_id: Organization ID.
         chunk_size: Maximum token count per chunk.
         chunk_overlap: Token overlap between adjacent chunks.
 
@@ -115,6 +118,7 @@ def chunk_document(
             version=doc.version,
             chunk_index=idx,
             section=section,
+            org_id=org_id,
         )
         chunks.append(chunk)
 
@@ -123,6 +127,7 @@ def chunk_document(
 
 def chunk_documents(
     docs: List[RawDocument],
+    org_id: str,
     chunk_size: int = 500,
     chunk_overlap: int = 50,
 ) -> List[DocumentChunk]:
@@ -130,6 +135,7 @@ def chunk_documents(
 
     Args:
         docs: List of loaded RawDocument objects.
+        org_id: Organization ID.
         chunk_size: Maximum token count per chunk.
         chunk_overlap: Overlapping tokens between adjacent chunks.
 
@@ -138,5 +144,5 @@ def chunk_documents(
     """
     all_chunks: List[DocumentChunk] = []
     for doc in docs:
-        all_chunks.extend(chunk_document(doc, chunk_size=chunk_size, chunk_overlap=chunk_overlap))
+        all_chunks.extend(chunk_document(doc, org_id=org_id, chunk_size=chunk_size, chunk_overlap=chunk_overlap))
     return all_chunks

@@ -1,10 +1,15 @@
 fastapi
 uvicorn
 langchain
-langchain-openai
+langchain-ollama
 langchain-text-splitters
 langchain-chroma
 chromadb
 python-dotenv
 pydantic
 tiktoken
+sqlalchemy
+pyjwt
+passlib
+bcrypt
+python-multipart

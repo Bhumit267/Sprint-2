@@ -1,4 +1,4 @@
-"""Embedding generation module using OpenAI text-embedding-3-small via LangChain."""
+"""Embedding generation module using Ollama Cloud (nomic-embed-text) via LangChain."""
 
 from app.embeddings.embedder import (
     DeterministicTestEmbeddings,
