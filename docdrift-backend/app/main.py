@@ -24,8 +24,6 @@ from app.ingestion.loader import load_markdown_documents
 from app.models.api import AskRequest, AskResponse, IngestResponse, IngestedDocumentInfo
 from app.models.chunk import RawDocument
 from app.retrieval.vector_store import (
-    get_chroma_client,
-    get_collection,
     index_chunks,
 )
 from app.models.db import init_db, get_db, Document
