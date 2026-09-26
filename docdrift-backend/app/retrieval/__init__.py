@@ -2,19 +2,15 @@
 
 from app.retrieval.vector_store import (
     DEFAULT_COLLECTION_NAME,
-    DEFAULT_PERSIST_DIR,
-    get_chroma_client,
-    get_collection,
+    get_pgvector_store,
     index_chunks,
 )
-from app.retrieval.search import build_chroma_filter, search
+from app.retrieval.search import build_pgvector_filter, search
 
 __all__ = [
     "DEFAULT_COLLECTION_NAME",
-    "DEFAULT_PERSIST_DIR",
-    "get_chroma_client",
-    "get_collection",
+    "get_pgvector_store",
     "index_chunks",
-    "build_chroma_filter",
+    "build_pgvector_filter",
     "search",
 ]

@@ -1,34 +1,22 @@
-"""Similarity search module with metadata filtering and score normalization."""
+"""Similarity search module with metadata filtering and score normalization for PGVector."""
 
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
-from app.embeddings.embedder import embed_query
+from app.embeddings.embedder import get_embedding_model
 from app.models.search import SearchResult
 from app.retrieval.vector_store import (
     DEFAULT_COLLECTION_NAME,
-    get_chroma_client,
-    get_collection,
+    get_pgvector_store,
 )
 
 
-def build_chroma_filter(
+def build_pgvector_filter(
     version: Optional[str] = None,
     doc_type: Optional[str] = None,
     org_id: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
-    """Builds a Chroma-compatible 'where' filter dictionary.
-
-    Handles single-condition filters or multi-condition '$and' conjunctions.
-
-    Args:
-        version: Target version filter (e.g. 'v2.1', 'v3.0').
-        doc_type: Target doc_type filter ('api_reference', 'migration_guide', 'changelog').
-        org_id: Target organization ID filter.
-
-    Returns:
-        Chroma where filter dictionary, or None if no filters specified.
-    """
+    """Builds a Langchain PGVector compatible 'where' filter dictionary."""
     conditions: List[Dict[str, Any]] = []
 
     if version:
@@ -56,66 +44,32 @@ def search(
     persist_dir: Optional[Union[str, Path]] = None,
     embedding_model=None,
 ) -> List[SearchResult]:
-    """Searches the Chroma vector store with optional version and document type filtering.
-
-    Pipeline:
-    1. Embeds the query text using Ollama Cloud nomic-embed-text via LangChain.
-    2. Constructs metadata filter expressions based on provided version/doc_type.
-    3. Runs vector similarity search against the Chroma collection.
-    4. Computes similarity scores from cosine distances.
-    5. Returns typed SearchResult instances carrying all chunk metadata.
-
-    Args:
-        query: User input query text.
-        org_id: Target organization ID filter.
-        version: Optional version to restrict search to (e.g., 'v2.1', 'v3.0').
-        doc_type: Optional document type filter.
-        top_k: Number of highest-ranking results to return.
-        collection_name: Name of Chroma collection to query.
-        persist_dir: Optional storage directory path.
-        embedding_model: Optional Embeddings model override.
-
-    Returns:
-        List of SearchResult objects sorted by similarity score descending.
-    """
+    """Searches the PGVector store with optional version and document type filtering."""
     if not query.strip():
         return []
 
-    client = get_chroma_client(persist_dir=persist_dir)
-    collection = get_collection(client=client, collection_name=collection_name)
+    if embedding_model is None:
+        embedding_model = get_embedding_model()
 
-    total_count = collection.count()
-    if total_count == 0:
-        return []
+    vectorstore = get_pgvector_store(embedding_model, collection_name=collection_name)
 
-    # 1. Embed query
-    query_vector = embed_query(query, embedding_model=embedding_model)
+    where_filter = build_pgvector_filter(version=version, doc_type=doc_type, org_id=org_id)
 
-    # 2. Build filter expression
-    where_filter = build_chroma_filter(version=version, doc_type=doc_type, org_id=org_id)
-
-    # Clamp top_k to existing collection count
-    n_results = min(top_k, total_count)
-
-    # 3. Query Chroma
-    raw_results = collection.query(
-        query_embeddings=[query_vector],
-        n_results=n_results,
-        where=where_filter,
-        include=["documents", "metadatas", "distances"],
+    raw_results = vectorstore.similarity_search_with_score(
+        query,
+        k=top_k,
+        filter=where_filter
     )
 
-    documents = raw_results.get("documents", [[]])[0]
-    metadatas = raw_results.get("metadatas", [[]])[0]
-    distances = raw_results.get("distances", [[]])[0]
-
     search_results: List[SearchResult] = []
-    for doc_text, meta, dist in zip(documents, metadatas, distances):
-        # Convert cosine distance to cosine similarity: score = 1.0 - distance
+    for doc, dist in raw_results:
+        # Langchain PGVector returns cosine distance by default.
+        # similarity = 1.0 - distance
         similarity = max(0.0, round(1.0 - float(dist), 4))
+        meta = doc.metadata
 
         result = SearchResult(
-            text=doc_text,
+            text=doc.page_content,
             similarity_score=similarity,
             source_doc=meta.get("source_doc", "unknown"),
             doc_type=meta.get("doc_type", "unknown"),
@@ -126,6 +80,5 @@ def search(
         )
         search_results.append(result)
 
-    # Sort descending by similarity score
     search_results.sort(key=lambda r: r.similarity_score, reverse=True)
     return search_results

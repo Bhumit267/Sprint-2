@@ -229,30 +229,29 @@ def generate_suggestions_endpoint(
 ) -> List[Dict[str, str]]:
     """Fetches random chunks from the org's documents and asks the LLM to generate diverse questions."""
     try:
+        from app.retrieval.vector_store import get_pgvector_store
+        from app.embeddings.embedder import get_embedding_model
+        
         org_id = current_user["org_id"]
-        client = get_chroma_client(CHROMA_PERSIST_DIR)
-        collection = get_collection(client, DEFAULT_COLLECTION_NAME)
         
-        where_clause = {"org_id": org_id}
+        where_clause = {"org_id": {"$eq": org_id}}
         if version:
-            where_clause["version"] = version
+            where_clause["version"] = {"$eq": version}
 
-        # Get up to 20 recent chunks for this org/version
-        results = collection.get(where=where_clause, limit=20)
+        vectorstore = get_pgvector_store(get_embedding_model())
         
-        if not results or not results["documents"]:
+        # Use similarity search with a general query to get 3 chunks
+        results = vectorstore.similarity_search("documentation examples configuration", k=3, filter=where_clause)
+        
+        if not results:
             # Fallback if no docs
             return [
                 {"text": "How do I get started?", "version": version or "v1.0"},
                 {"text": "What are the authentication methods?", "version": version or "v1.0"}
             ]
             
-        # Pick 2-3 random chunks
-        num_chunks = min(3, len(results["documents"]))
-        indices = random.sample(range(len(results["documents"])), num_chunks)
-        
-        context_texts = [results["documents"][i] for i in indices]
-        versions = [results["metadatas"][i].get("version", "unknown") for i in indices]
+        context_texts = [doc.page_content for doc in results]
+        versions = [doc.metadata.get("version", "unknown") for doc in results]
         
         # Call LLM to generate questions
         llm = get_llm(GENERATION_MODEL)

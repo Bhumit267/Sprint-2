@@ -3,15 +3,15 @@
 import os
 from pathlib import Path
 from typing import List, Optional, Union
-import chromadb
-from chromadb.api import ClientAPI
-from chromadb.api.models.Collection import Collection
+
+from langchain_postgres.vectorstores import PGVector
+from langchain_core.documents import Document as LCDocument
+from sqlalchemy import create_engine
 
 from dotenv import load_dotenv
 
 from app.config import (
-    CHROMA_PERSIST_DIR,
-    CHROMA_PERSIST_DIRECTORY,
+    DATABASE_URL,
     DEFAULT_COLLECTION_NAME,
     EMBEDDING_DIMENSION,
     EMBEDDING_MODEL,
@@ -21,42 +21,14 @@ from app.models.chunk import DocumentChunk
 
 load_dotenv()
 
-DEFAULT_PERSIST_DIR = CHROMA_PERSIST_DIR
-
-
-def get_chroma_client(persist_dir: Optional[Union[str, Path]] = None) -> ClientAPI:
-    """Initializes and returns a persistent Chroma vector database client.
-
-    Args:
-        persist_dir: Optional custom storage path. Defaults to data/chroma_db.
-
-    Returns:
-        chromadb.PersistentClient instance.
-    """
-    directory = Path(persist_dir or CHROMA_PERSIST_DIRECTORY or DEFAULT_PERSIST_DIR).resolve()
-    directory.mkdir(parents=True, exist_ok=True)
-    return chromadb.PersistentClient(path=str(directory))
-
-
-def get_collection(
-    client: Optional[ClientAPI] = None,
-    collection_name: str = DEFAULT_COLLECTION_NAME,
-) -> Collection:
-    """Retrieves or creates a persistent Chroma collection configured with cosine space.
-
-    Args:
-        client: Existing Chroma client. If None, initializes client with default persist dir.
-        collection_name: Name of the collection in Chroma.
-
-    Returns:
-        The requested Chroma Collection instance.
-    """
-    c = client or get_chroma_client()
-    return c.get_or_create_collection(
-        name=collection_name,
-        metadata={"hnsw:space": "cosine"},
+def get_pgvector_store(embedding_model, collection_name: str = DEFAULT_COLLECTION_NAME) -> PGVector:
+    """Initializes and returns a PGVector store using Supabase."""
+    return PGVector(
+        embeddings=embedding_model,
+        collection_name=collection_name,
+        connection=DATABASE_URL,
+        use_jsonb=True,
     )
-
 
 def index_chunks(
     chunks: List[DocumentChunk],
@@ -64,51 +36,37 @@ def index_chunks(
     persist_dir: Optional[Union[str, Path]] = None,
     embedding_model=None,
 ) -> int:
-    """Generates embeddings and indexes document chunks into the persistent Chroma collection.
-
-    Stores:
-    - Text content as document body
-    - Embeddings generated via Ollama Cloud (nomic-embed-text, 768 dims)
-    - Full metadata: {source_doc, doc_type, version, chunk_index, section}
-    - Deterministic, collision-free chunk IDs
-
+    """Indexes document chunks into Supabase PGVector.
+    
     Args:
         chunks: List of DocumentChunk instances to index.
-        collection_name: Target Chroma collection name.
-        persist_dir: Directory where Chroma stores vector data.
-        embedding_model: Optional Embeddings model override.
-
+        collection_name: Target collection name.
+        persist_dir: Ignored (kept for backwards compatibility).
+        embedding_model: Embeddings model.
+        
     Returns:
-        The total number of chunks indexed into the collection.
+        The total number of chunks indexed.
     """
     if not chunks:
         return 0
 
-    client = get_chroma_client(persist_dir=persist_dir)
-    collection = get_collection(client=client, collection_name=collection_name)
+    if embedding_model is None:
+        embedding_model = get_embedding_model()
 
-    # Generate embeddings via embedding module
-    embeddings = generate_embeddings(chunks, embedding_model=embedding_model)
+    vectorstore = get_pgvector_store(embedding_model, collection_name)
 
-    ids: List[str] = []
-    documents: List[str] = []
-    metadatas: List[dict] = []
-
+    documents = []
+    ids = []
     for chunk in chunks:
-        # Create deterministic ID: {version}_{doc_stem}_{chunk_index}
         doc_stem = Path(chunk.source_doc).stem
         chunk_id = f"{chunk.version}_{doc_stem}_{chunk.chunk_index}"
-
+        
+        doc = LCDocument(
+            page_content=chunk.text,
+            metadata=chunk.get_metadata()
+        )
+        documents.append(doc)
         ids.append(chunk_id)
-        documents.append(chunk.text)
-        metadatas.append(chunk.get_metadata())
 
-    # Upsert into Chroma (updates existing or inserts new)
-    collection.upsert(
-        ids=ids,
-        embeddings=embeddings,
-        documents=documents,
-        metadatas=metadatas,
-    )
-
+    vectorstore.add_documents(documents, ids=ids)
     return len(chunks)
