@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./docdrift-backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./docdrift-backend/data:/app/data
+    env_file:
+      - ./docdrift-backend/.env
+    restart: unless-stopped
+    networks:
+      - docdrift-network
+
+  frontend:
+    build:
+      context: ./docdrift-frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      # In Docker network, frontend should talk to backend container directly if it's SSR,
+      # but since it's client-side fetch, NEXT_PUBLIC_API_URL must point to the exposed localhost.
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - docdrift-network
+
+networks:
+  docdrift-network:
+    driver: bridge
