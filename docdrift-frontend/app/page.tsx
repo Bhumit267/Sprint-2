@@ -4,20 +4,14 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Navigation from '@/components/Navigation';
 import VersionDropdown from '@/components/VersionDropdown';
-import { getVersions } from '@/lib/api';
-
-const EXAMPLE_QUESTION_TEXTS = [
-  'How do I authenticate a request?',
-  "How do I get a user's address?",
-  'What breaking changes were introduced?',
-  'How do I configure rate limits and retries?',
-];
+import { getVersions, getSuggestions } from '@/lib/api';
 
 export default function LandingPage() {
   const router = useRouter();
   const [question, setQuestion] = useState('');
   const [version, setVersion] = useState('');
   const [availableVersions, setAvailableVersions] = React.useState<string[]>([]);
+  const [suggestions, setSuggestions] = React.useState<{text: string, version: string}[]>([]);
   const [loading, setLoading] = React.useState(true);
 
   React.useEffect(() => {
@@ -27,6 +21,13 @@ export default function LandingPage() {
         setAvailableVersions(versions);
         if (versions.length > 0) {
           setVersion(versions[0]);
+        }
+        
+        try {
+          const fetchedSuggestions = await getSuggestions(versions.length > 0 ? versions[0] : undefined);
+          setSuggestions(fetchedSuggestions);
+        } catch (err) {
+          console.error('Failed to load dynamic suggestions', err);
         }
       } catch (err) {
         console.error('Failed to load versions', err);
@@ -126,29 +127,32 @@ export default function LandingPage() {
             </form>
 
             {/* Example Question Chips */}
-            <div className="space-y-2.5 pt-2">
-              <p className="text-[11px] sm:text-xs font-mono uppercase tracking-wider text-study-text/50 dark:text-study-text-dark/50">
-                Suggested Reference Inquiries
-              </p>
-              <div className="flex flex-wrap justify-center gap-2">
-                {EXAMPLE_QUESTION_TEXTS.map((text, i) => {
-                  const exVersion = availableVersions[i % availableVersions.length];
-                  return (
+            {suggestions.length > 0 && (
+              <div className="space-y-2.5 pt-2">
+                <div className="flex items-center justify-center gap-2 text-[11px] sm:text-xs font-mono uppercase tracking-wider text-study-text/50 dark:text-study-text-dark/50">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-accent"></span>
+                  </span>
+                  AI Suggested Inquiries
+                </div>
+                <div className="flex flex-wrap justify-center gap-2">
+                  {suggestions.map((sug, i) => (
                     <button
                       key={i}
                       type="button"
-                      onClick={() => handleSelectExample(text, exVersion)}
+                      onClick={() => handleSelectExample(sug.text, sug.version)}
                       className="inline-flex items-center gap-1.5 sm:gap-2 rounded-lg border border-study-border dark:border-study-border-dark bg-[#FFFFFF] dark:bg-[#1A1F1A] px-2.5 sm:px-3 py-1.5 text-left text-xs font-mono text-study-text/80 dark:text-study-text-dark/80 hover:border-accent hover:text-accent dark:hover:border-accent dark:hover:text-accent transition-all cursor-pointer shadow-2xs group max-w-full"
                     >
-                      <span className="break-words line-clamp-1">{text}</span>
+                      <span className="break-words line-clamp-1">{sug.text}</span>
                       <span className="text-[10px] text-accent font-semibold rounded bg-accent/10 px-1 py-0.2 shrink-0">
-                        {exVersion}
+                        {sug.version}
                       </span>
                     </button>
-                  );
-                })}
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
           </>
         )}
       </main>

@@ -212,6 +212,81 @@ def list_versions_endpoint(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch versions from database: {str(e)}",
         )
+
+import random
+from app.generation.generator import get_llm
+
+@app.get(
+    "/suggestions",
+    response_model=List[Dict[str, str]],
+    status_code=status.HTTP_200_OK,
+    tags=["Query"],
+    summary="Dynamically generate suggested questions based on the organization's documents",
+)
+def generate_suggestions_endpoint(
+    version: str = None,
+    current_user: Dict[str, Any] = Depends(require_role("admin", "employee")),
+) -> List[Dict[str, str]]:
+    """Fetches random chunks from the org's documents and asks the LLM to generate diverse questions."""
+    try:
+        org_id = current_user["org_id"]
+        client = get_chroma_client(CHROMA_PERSIST_DIR)
+        collection = get_collection(client, DEFAULT_COLLECTION_NAME)
+        
+        where_clause = {"org_id": org_id}
+        if version:
+            where_clause["version"] = version
+
+        # Get up to 20 recent chunks for this org/version
+        results = collection.get(where=where_clause, limit=20)
+        
+        if not results or not results["documents"]:
+            # Fallback if no docs
+            return [
+                {"text": "How do I get started?", "version": version or "v1.0"},
+                {"text": "What are the authentication methods?", "version": version or "v1.0"}
+            ]
+            
+        # Pick 2-3 random chunks
+        num_chunks = min(3, len(results["documents"]))
+        indices = random.sample(range(len(results["documents"])), num_chunks)
+        
+        context_texts = [results["documents"][i] for i in indices]
+        versions = [results["metadatas"][i].get("version", "unknown") for i in indices]
+        
+        # Call LLM to generate questions
+        llm = get_llm(GENERATION_MODEL)
+        
+        prompt = (
+            "You are a developer documentation assistant. Based on the following documentation snippets, "
+            "generate exactly 3 distinct, concise, and helpful questions that a developer might ask. "
+            "Return ONLY the questions, one per line, with no numbering, bullets, or extra text.\n\n"
+            "Snippets:\n"
+            + "\n---\n".join(context_texts)
+        )
+        
+        response = llm.complete(prompt)
+        lines = [line.strip().lstrip("-*1234567890. ") for line in response.text.split("\n") if line.strip()]
+        
+        suggestions = []
+        for i in range(min(3, len(lines))):
+            suggestions.append({
+                "text": lines[i],
+                "version": versions[i % len(versions)]
+            })
+            
+        # Ensure we always return at least something
+        if not suggestions:
+            return [{"text": "How do I configure this?", "version": version or "v1.0"}]
+            
+        return suggestions
+        
+    except Exception as e:
+        # Graceful fallback in case of LLM error so the homepage doesn't crash
+        return [
+            {"text": "How do I authenticate?", "version": version or "v1.0"},
+            {"text": "What are the rate limits?", "version": version or "v1.0"}
+        ]
 @app.get(
     "/documents/{doc_id}/download",
     status_code=status.HTTP_200_OK,
